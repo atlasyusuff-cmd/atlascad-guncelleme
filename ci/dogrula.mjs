@@ -155,18 +155,12 @@ try {
   let hedef = await baslat();
   yaz('program açıldı (pencere)', true, `${hedef.title}`);
   yaz('program arayüzü (window.api) var', await calistir(`return typeof window.api === 'object' && typeof window.api.projeKaydet === 'function';`));
-  let ortam = await ortamOku();
-  if (!ortam.webgl2) {
-    // GitHub'ın Intel sanal makinesinde ekran kartı yok (gerçek Intel Mac'lerde var): ekran görüntüsü alınıp yazılım çiziciyle yeniden açılır
-    yaz('bu CI makinesinde donanım WebGL yok (sanal makine) → yazılım çiziciyle (SwiftShader) yeniden açılıyor', true, `${ortam.gpu} · ekran ${ortam.ekran}`, false);
-    ekran('0-ekran-karti-yok');
-    try { ws.close(); } catch { /* yok */ }
-    surec.kill();
-    await bekle(3000);
-    hedef = await baslat(['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']);
-    ortam = await ortamOku();
-  }
-  yaz('Mac ortamı (Macintosh), WebGL2', /Macintosh/.test(ortam.ua) && ortam.webgl2, `${ortam.gpu} · WebGPU ${ortam.webgpu} · ekran ${ortam.ekran} · pencere ${ortam.pencere}`);
+  const ortam = await ortamOku();
+  yaz('Mac ortamı (Macintosh)', /Macintosh/.test(ortam.ua), `ekran ${ortam.ekran} · pencere ${ortam.pencere}`);
+  // GitHub'ın Intel sanal makinesinde ekran kartı yok (GPU süreci açılamıyor; SwiftShader de denendi, açılmadı). Gerçek Intel Mac'lerde
+  // ekran kartı var; Intel'de 3B bu makinede denenemez → yalnız Apple Silicon'da kritik
+  yaz('WebGL2 (3B çizim, ekran kartı)', ortam.webgl2, `${ortam.gpu} · WebGPU ${ortam.webgpu}`, MIMARI === 'arm64');
+  if (!ortam.webgl2) ekran('0-ekran-karti-yok');
 
   // Lisans 1: ilk açılış → 14 gün deneme; makine kodu taslak yayına (yerel betik lisans üretir)
   const ld = await lisansDurumu();
@@ -210,19 +204,32 @@ try {
     window.confirm = () => true;
     window.tikla = (re, kok = document) => { const e = [...kok.querySelectorAll('button')].find(b => re.test(b.textContent.trim()) && !b.disabled); e?.click(); return !!e; };
     window.uyu = (ms) => new Promise(r => setTimeout(r, ms));`);
-  const acildi = await calistir(`tikla(/^Yeni$/); await uyu(700); tikla(/^Kaydetmeden devam$/); await uyu(900); [...document.querySelectorAll('*')].find(e => e.children.length === 0 && e.textContent.trim() === 'Örnek mutfağı incele')?.click(); await uyu(3000); tikla(/^3B$/); await uyu(3500); const c = [...document.querySelectorAll('canvas')].filter((x) => x.width > 300 && x.height > 200).length; const m = document.body.innerText.replace(/\\s+/g, ' ').match(/örnek mutfak \\((\\d+) dolap\\)/); return JSON.stringify({ c, dolap: m ? Number(m[1]) : 0, arayuz: !!document.querySelector('.ust-adimlar') });`, 60_000);
-  const aj = JSON.parse(acildi);
-  yaz('örnek mutfak açıldı (3B)', aj.dolap > 0 && aj.c > 0, `${aj.dolap} dolap · 3B tuval ${aj.c} · arayüz ${aj.arayuz}`, ortam.webgl2);
-  await sayfaGoruntu('2-ornek-mutfak-3b');
-  ekran('2-ornek-mutfak-3b-ekran');
-  if (!aj.arayuz) {
-    // Ekran kartsız makinede 3B açılınca arayüz çöküyor (bkz. TARTISMA): örnek proje kaydedilen oturumdan Parça Listesi sekmesinde
-    // yeniden açılır, üretim ekranları 3B'siz denenir
-    const yeniden = await calistir(`const ham = await window.api.oturumOku(); if (!ham) return 'oturum yok'; const o = JSON.parse(ham); if (!o.proje) return 'proje yok'; o.sekme = 'liste'; await window.api.oturumYaz(JSON.stringify(o)); location.reload(); return 'yeniden yüklendi';`).catch((e) => e.message);
-    await bekle(6000);
-    await calistir(`window.confirm = () => true; window.tikla = (re, kok = document) => { const e = [...kok.querySelectorAll('button')].find(b => re.test(b.textContent.trim()) && !b.disabled); e?.click(); return !!e; }; window.uyu = (ms) => new Promise(r => setTimeout(r, ms)); return true;`).catch(() => {});
-    const var2 = await calistir(`return !!document.querySelector('.ust-adimlar');`).catch(() => false);
-    yaz('ekran kartsız: örnek proje 3B\'siz (Parça Listesi) yeniden açıldı', var2, yeniden, false);
+  // Finder'da .mcad'e çift tıklama yolu (Mac'te dosya `open-file` olayıyla gelir): boş projede Üretim → Parça Listesi açıkken
+  // `open -a AtlasCAD ornek.mcad`; proje o sekmede (3B'siz) açılmalı
+  const ORNEK = process.env.ORNEK_MCAD;
+  const dosyaylaAc = async () => {
+    if (!ORNEK || !existsSync(ORNEK)) return { hata: 'örnek .mcad yok' };
+    await calistir(`tikla(/^Yeni$/); await uyu(700); tikla(/^Kaydetmeden devam$/); await uyu(900); tikla(/Üretim$/, document.querySelector('.ust-adimlar')); await uyu(1200); tikla(/^Parça Listesi$/); await uyu(1200); return true;`);
+    const o = sh('open', ['-a', APP, ORNEK]);
+    for (let i = 0; i < 30; i++) {
+      await bekle(1000);
+      const r = JSON.parse(await calistir(`return JSON.stringify({ baslik: document.title, satir: document.querySelector('main.orta')?.querySelectorAll('tr').length ?? 0 });`));
+      if (/Örnek Mutfak/.test(r.baslik) && r.satir > 10) return r;
+      if (i === 29) return { ...r, open: o.cikti };
+    }
+    return {};
+  };
+
+  if (ortam.webgl2) {
+    const acildi = await calistir(`tikla(/^Yeni$/); await uyu(700); tikla(/^Kaydetmeden devam$/); await uyu(900); [...document.querySelectorAll('*')].find(e => e.children.length === 0 && e.textContent.trim() === 'Örnek mutfağı incele')?.click(); await uyu(3000); tikla(/^3B$/); await uyu(3500); const c = [...document.querySelectorAll('canvas')].filter((x) => x.width > 300 && x.height > 200).length; const m = document.body.innerText.replace(/\\s+/g, ' ').match(/örnek mutfak \\((\\d+) dolap\\)/); return JSON.stringify({ c, dolap: m ? Number(m[1]) : 0, arayuz: !!document.querySelector('.ust-adimlar') });`, 60_000);
+    const aj = JSON.parse(acildi);
+    yaz('örnek mutfak açıldı (3B)', aj.dolap > 0 && aj.c > 0, `${aj.dolap} dolap · 3B tuval ${aj.c} · arayüz ${aj.arayuz}`);
+    await sayfaGoruntu('2-ornek-mutfak-3b');
+    ekran('2-ornek-mutfak-3b-ekran');
+  } else {
+    // Ekran kartsız CI makinesi: 3B açılınca arayüz çöküyor (bkz. TARTISMA) → örnek mutfak dosyayla, Parça Listesi'nde açılır
+    const r = await dosyaylaAc();
+    yaz('ekran kartsız: örnek mutfak .mcad dosyasıyla (Finder yolu) Parça Listesi\'nde açıldı', r.satir > 10, JSON.stringify(r).slice(0, 200));
   }
   const liste = await calistir(`tikla(/Üretim$/, document.querySelector('.ust-adimlar')); await uyu(1500); tikla(/^Parça Listesi$/); await uyu(2500); const t = document.querySelector('main.orta'); return JSON.stringify({ satir: t?.querySelectorAll('tr').length ?? 0, metin: (t?.innerText ?? '').slice(0, 200).replace(/\\s+/g, ' ') });`, 60_000);
   const lj = JSON.parse(liste);
@@ -233,6 +240,10 @@ try {
   yaz('kesim planı (plaka yerleşimi) çizildi', kj.svg > 0, `${kj.svg} plaka · ${(kj.metin ?? '').slice(0, 120)}`);
   await sayfaGoruntu('4-kesim-plani');
   ekran('4-kesim-plani-ekran');
+  if (ortam.webgl2) {
+    const r = await dosyaylaAc();
+    yaz('.mcad dosyasına çift tıklama (Finder, open-file) projeyi açar', r.satir > 10, JSON.stringify(r).slice(0, 200));
+  }
 
   // Mac menüsü ve gerçek Cmd+Z (System Events ile klavyeden): çizimdeki "geri al" kısayolu sayfaya ulaşıyor mu, menü yutuyor mu?
   // (Erişilebilirlik izni yoksa osascript çalışmaz → bilgi olarak yazılır)
@@ -346,13 +357,19 @@ try {
     sh('sudo', ['spctl', '--master-enable']);
   }
   yaz('Gatekeeper durumu (site görüntüsü öncesi)', true, sh('spctl', ['--status']).cikti, false);
+  // Tanı: karantinalı kopyanın imzası ve Apple'ın dağıtım denetimi ("hasarlı" ile "açılmadı" uyarısı neden farklı çıkıyor)
+  yaz('karantinalı kopya imza denetimi', true, sh('codesign', ['--verify', '--deep', '--strict', '--verbose=4', karantina]).cikti.slice(-300), false);
+  yaz('syspolicy_check distribution', true, sh('syspolicy_check', ['distribution', karantina]).cikti.slice(0, 500), false);
+  yaz('karantina özniteliği', true, sh('xattr', ['-l', karantina]).cikti.slice(0, 200), false);
   sh('open', [karantina]);
   await bekle(7000);
   ekran('site-2-gatekeeper-uyarisi');
+  const gkKayit = sh('log', ['show', '--last', '3m', '--style', 'compact', '--predicate', 'process == "syspolicyd" OR process == "CoreServicesUIAgent" OR subsystem == "com.apple.syspolicy.exec"'], { timeout: 60_000, maxBuffer: 32 * 1024 * 1024 });
+  writeFileSync(join(KANIT, 'gatekeeper-gunlugu.txt'), gkKayit.cikti.split('\n').slice(-400).join('\n'));
   // Uyarıdaki düğmeler (dil İngilizce ya da Türkçe olabilir); "Bitti / Done" — ÇÖP SEPETİNE TAŞI'ya değil
   const uyariMetni = sh('osascript', ['-e', 'tell application "System Events" to tell process "CoreServicesUIAgent" to get {name of every button of window 1, value of every static text of window 1}']);
   yaz('Gatekeeper uyarısının metni', true, uyariMetni.cikti.slice(0, 400), false);
-  const bitti = sh('osascript', ['-e', 'tell application "System Events" to tell process "CoreServicesUIAgent" to click (first button of window 1 whose name is "Bitti" or name is "Done")']);
+  const bitti = sh('osascript', ['-e', 'tell application "System Events" to tell process "CoreServicesUIAgent" to click (first button of window 1 whose name is "Bitti" or name is "Done" or name is "Vazgeç" or name is "Cancel")']);
   yaz('uyarıda "Bitti"ye basıldı', bitti.ok, bitti.cikti.slice(0, 200), false);
   await bekle(3000);
   sh('killall', ['AtlasCAD']);
