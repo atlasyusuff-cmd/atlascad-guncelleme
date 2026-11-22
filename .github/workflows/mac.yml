@@ -1,0 +1,104 @@
+# K-068 — AtlasCAD Mac paketi (Apple Silicon + Intel dmg). Bu dosyanın asıl kopyası AtlasCAD klasöründe .github/workflows/mac.yml;
+# herkese açık güncelleme deposuna (atlasyusuff-cmd/atlascad-guncelleme) scripts/mac-derle.mjs yükler ve başlatır. Elle başlatılmaz:
+# kaynak kod depoda yok, her derlemede şifreli olarak taslak yayına konur, anahtar KAYNAK_ANAHTARI gizli değişkenindedir.
+# Günlükler herkese açık: kaynak / test çıktısı basılmaz. Yapıtlar (dmg + ekran görüntüleri) 7 gün durur.
+name: Mac paketi
+run-name: Mac paketi ${{ inputs.etiket }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      kaynak:
+        description: Şifreli kaynak (taslak yayın varlık no)
+        required: true
+      yayin:
+        description: Taslak yayın no (makine kodu / deneme lisansı alışverişi)
+        required: true
+      etiket:
+        description: Derleme etiketi
+        required: true
+      mimariler:
+        description: Derlenecek mimariler
+        required: false
+        default: arm64,x64
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mac-paketi
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    name: Mac ${{ matrix.mimari }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mimari: arm64
+            runner: macos-15
+          - mimari: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      SECILI: ${{ contains(inputs.mimariler, matrix.mimari) }}
+      KAYNAK_NO: ${{ inputs.kaynak }}
+      YAYIN_NO: ${{ inputs.yayin }}
+      ETIKET: ${{ inputs.etiket }}
+      MIMARI: ${{ matrix.mimari }}
+    steps:
+      - uses: actions/checkout@v5
+        if: env.SECILI == 'true'
+
+      - uses: actions/setup-node@v5
+        if: env.SECILI == 'true'
+        with:
+          node-version: '26'
+
+      - name: Kaynağı çöz
+        if: env.SECILI == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KAYNAK_ANAHTARI: ${{ secrets.KAYNAK_ANAHTARI }}
+        run: node ci/kaynak-coz.mjs "$KAYNAK_NO" "$RUNNER_TEMP/kaynak"
+
+      - name: Bağımlılıklar
+        if: env.SECILI == 'true'
+        working-directory: ${{ runner.temp }}/kaynak
+        run: npm ci --no-audit --no-fund --loglevel=error
+
+      - name: Mac yardımcı testleri (gerçek ioreg / diskutil çıktısı)
+        if: env.SECILI == 'true'
+        continue-on-error: true
+        working-directory: ${{ runner.temp }}/kaynak
+        run: npx vitest run tests/k068Mac.test.ts tests/k068MacGercek.test.ts --reporter=dot
+
+      - name: Paketle (dmg)
+        if: env.SECILI == 'true'
+        working-directory: ${{ runner.temp }}/kaynak
+        run: node scripts/paketle-mac.mjs --arch "$MIMARI"
+
+      - name: Doğrula (aç, lisans, örnek mutfak, kesim listesi, ekran görüntüleri)
+        if: env.SECILI == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ci/dogrula.mjs "$RUNNER_TEMP/kaynak" "$RUNNER_TEMP/kanit" "$MIMARI" "$ETIKET" "$YAYIN_NO"
+
+      - name: Yapıtları topla, kaynağı sil
+        if: always() && env.SECILI == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/yapit"
+          cp "$RUNNER_TEMP"/kaynak/dist-mac/*.dmg "$RUNNER_TEMP/yapit/" 2>/dev/null || true
+          cp -R "$RUNNER_TEMP/kanit" "$RUNNER_TEMP/yapit/kanit" 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/kaynak"
+
+      - uses: actions/upload-artifact@v4
+        if: always() && env.SECILI == 'true'
+        with:
+          name: mac-${{ matrix.mimari }}
+          path: ${{ runner.temp }}/yapit
+          retention-days: 7
+          if-no-files-found: warn
+          compression-level: 0
