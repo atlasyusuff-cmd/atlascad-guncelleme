@@ -98,12 +98,8 @@ const denemeMac = join(homedir(), 'Library', 'Preferences', '.atlascad-d.json');
 rmSync(denemeMac, { force: true });
 sh('defaults', ['delete', 'tr.atlascad.kayit']);
 const gunluk = [];
-const surec = spawn(ikili, [`--remote-debugging-port=${kapi}`, `--user-data-dir=${profil}`], { stdio: ['ignore', 'pipe', 'pipe'] });
-surec.stdout.on('data', (b) => gunluk.push(String(b)));
-surec.stderr.on('data', (b) => gunluk.push(String(b)));
+let surec = null;
 let cikisKodu = null;
-surec.on('exit', (k, s) => { cikisKodu = `${k ?? ''}${s ?? ''}`; });
-
 let ws;
 let sira = 0;
 const bekleyen = new Map();
@@ -127,7 +123,13 @@ const sayfaGoruntu = async (ad) => {
 };
 const lisansDurumu = async () => JSON.parse(await calistir('return JSON.stringify(await window.api.lisansDurumu());'));
 
-try {
+/** Programı geçici profille açar ve CDP'ye bağlanır. `ek`: ek Chromium bayrakları (ekran kartsız makinede yazılım çizici). */
+async function baslat(ek = []) {
+  cikisKodu = null;
+  surec = spawn(ikili, [`--remote-debugging-port=${kapi}`, `--user-data-dir=${profil}`, ...ek], { stdio: ['ignore', 'pipe', 'pipe'] });
+  surec.stdout.on('data', (b) => gunluk.push(String(b)));
+  surec.stderr.on('data', (b) => gunluk.push(String(b)));
+  surec.on('exit', (k, s) => { cikisKodu = `${k ?? ''}${s ?? ''}`; });
   let hedef;
   for (let i = 0; i < 90 && !hedef; i++) {
     await bekle(1000);
@@ -145,9 +147,25 @@ try {
   };
   await gonder('Runtime.enable');
   await bekle(4000);
+  return hedef;
+}
+const ortamOku = async () => JSON.parse(await calistir(`const c = document.createElement('canvas'); const g = c.getContext('webgl2'); const d = g && g.getExtension('WEBGL_debug_renderer_info'); return JSON.stringify({ ua: navigator.userAgent, webgl2: !!g, gpu: d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : null, webgpu: !!navigator.gpu, ekran: screen.width + 'x' + screen.height, pencere: innerWidth + 'x' + innerHeight });`));
+
+try {
+  let hedef = await baslat();
   yaz('program açıldı (pencere)', true, `${hedef.title}`);
   yaz('program arayüzü (window.api) var', await calistir(`return typeof window.api === 'object' && typeof window.api.projeKaydet === 'function';`));
-  const ortam = JSON.parse(await calistir(`const c = document.createElement('canvas'); const g = c.getContext('webgl2'); const d = g && g.getExtension('WEBGL_debug_renderer_info'); return JSON.stringify({ ua: navigator.userAgent, webgl2: !!g, gpu: d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : null, webgpu: !!navigator.gpu, ekran: screen.width + 'x' + screen.height, pencere: innerWidth + 'x' + innerHeight });`));
+  let ortam = await ortamOku();
+  if (!ortam.webgl2) {
+    // GitHub'ın Intel sanal makinesinde ekran kartı yok (gerçek Intel Mac'lerde var): ekran görüntüsü alınıp yazılım çiziciyle yeniden açılır
+    yaz('bu CI makinesinde donanım WebGL yok (sanal makine) → yazılım çiziciyle (SwiftShader) yeniden açılıyor', true, `${ortam.gpu} · ekran ${ortam.ekran}`, false);
+    ekran('0-ekran-karti-yok');
+    try { ws.close(); } catch { /* yok */ }
+    surec.kill();
+    await bekle(3000);
+    hedef = await baslat(['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']);
+    ortam = await ortamOku();
+  }
   yaz('Mac ortamı (Macintosh), WebGL2', /Macintosh/.test(ortam.ua) && ortam.webgl2, `${ortam.gpu} · WebGPU ${ortam.webgpu} · ekran ${ortam.ekran} · pencere ${ortam.pencere}`);
 
   // Lisans 1: ilk açılış → 14 gün deneme; makine kodu taslak yayına (yerel betik lisans üretir)
@@ -192,18 +210,19 @@ try {
     window.confirm = () => true;
     window.tikla = (re, kok = document) => { const e = [...kok.querySelectorAll('button')].find(b => re.test(b.textContent.trim()) && !b.disabled); e?.click(); return !!e; };
     window.uyu = (ms) => new Promise(r => setTimeout(r, ms));`);
-  const acildi = await calistir(`tikla(/^Yeni$/); await uyu(700); tikla(/^Kaydetmeden devam$/); await uyu(900); [...document.querySelectorAll('*')].find(e => e.children.length === 0 && e.textContent.trim() === 'Örnek mutfağı incele')?.click(); await uyu(3000); tikla(/^3B$/); await uyu(3500); return document.body.innerText.slice(0, 400).replace(/\\s+/g, ' ');`, 60_000);
-  const modul = (acildi.match(/\d+ modül \d+ parça/) ?? [''])[0];
-  yaz('örnek mutfak açıldı (3B)', /\d+ modül/.test(acildi) && !/^\s*0 modül/.test(modul), modul);
+  const acildi = await calistir(`tikla(/^Yeni$/); await uyu(700); tikla(/^Kaydetmeden devam$/); await uyu(900); [...document.querySelectorAll('*')].find(e => e.children.length === 0 && e.textContent.trim() === 'Örnek mutfağı incele')?.click(); await uyu(3000); tikla(/^3B$/); await uyu(3500); const c = [...document.querySelectorAll('main.orta canvas')].filter((x) => x.width > 300 && x.height > 200).length; return JSON.stringify({ c, metin: document.body.innerText.replace(/\\s+/g, ' ').slice(0, 3000) });`, 60_000);
+  const aj = JSON.parse(acildi);
+  const dolap = (aj.metin.match(/örnek mutfak \((\d+) dolap\)/) ?? [])[1];
+  yaz('örnek mutfak açıldı (3B)', Number(dolap) > 0 && aj.c > 0, `${dolap} dolap · 3B tuval ${aj.c}`);
   await sayfaGoruntu('2-ornek-mutfak-3b');
   ekran('2-ornek-mutfak-3b-ekran');
   const liste = await calistir(`tikla(/Üretim$/, document.querySelector('.ust-adimlar')); await uyu(1500); tikla(/^Parça Listesi$/); await uyu(2500); const t = document.querySelector('main.orta'); return JSON.stringify({ satir: t?.querySelectorAll('tr').length ?? 0, metin: (t?.innerText ?? '').slice(0, 200).replace(/\\s+/g, ' ') });`, 60_000);
   const lj = JSON.parse(liste);
   yaz('parça listesi (kesim listesi) dolu', lj.satir > 10, `${lj.satir} satır · ${lj.metin.slice(0, 120)}`);
   await sayfaGoruntu('3-parca-listesi');
-  const kesim = await calistir(`tikla(/^Kesim Planı$/); for (let i = 0; i < 60; i++) { await uyu(1000); const s = document.querySelectorAll('main.orta svg').length; if (s > 0) { await uyu(1500); return JSON.stringify({ svg: s, metin: (document.querySelector('main.orta')?.innerText ?? '').slice(0, 200).replace(/\\s+/g, ' ') }); } } return JSON.stringify({ svg: 0 });`, 90_000);
+  const kesim = await calistir(`tikla(/^Kesim Planı$/); await uyu(1500); tikla(/^Optimize et$/); for (let i = 0; i < 90; i++) { await uyu(1000); const s = document.querySelectorAll('main.orta .plaka-kart').length; if (s > 0) { await uyu(2000); return JSON.stringify({ svg: s, metin: (document.querySelector('main.orta')?.innerText ?? '').replace(/\\s+/g, ' ').slice(0, 300) }); } } return JSON.stringify({ svg: 0, metin: (document.querySelector('main.orta')?.innerText ?? '').replace(/\\s+/g, ' ').slice(0, 300) });`, 120_000);
   const kj = JSON.parse(kesim);
-  yaz('kesim planı (plaka yerleşimi) çizildi', kj.svg > 0, `${kj.svg} çizim · ${(kj.metin ?? '').slice(0, 120)}`);
+  yaz('kesim planı (plaka yerleşimi) çizildi', kj.svg > 0, `${kj.svg} plaka · ${(kj.metin ?? '').slice(0, 120)}`);
   await sayfaGoruntu('4-kesim-plani');
   ekran('4-kesim-plani-ekran');
 
@@ -297,9 +316,12 @@ try {
 try {
   sh('defaults', ['write', '-g', 'AppleLanguages', '-array', 'tr-TR', 'en-US']);
   sh('defaults', ['write', '-g', 'AppleLocale', '-string', 'tr_TR']);
+  // Sistem uyarı penceresi (CoreServicesUIAgent) dili yeniden başlayınca okur: tercih önbelleği + ajan yeniden başlatılır
+  sh('killall', ['cfprefsd']);
   sh('killall', ['Finder']);
   sh('killall', ['CoreServicesUIAgent']);
-  await bekle(4000);
+  sh('launchctl', ['kickstart', '-k', `gui/${process.getuid()}/com.apple.coreservices.uiagent`]);
+  await bekle(5000);
   // dmg penceresi: "AtlasCAD'i Uygulamalar'a sürükleyin"
   const ek2 = sh('hdiutil', ['attach', '-readonly', dmg]);
   const nokta = (ek2.cikti.match(/\/Volumes\/[^\n]+/) ?? [''])[0].trim();
@@ -319,14 +341,37 @@ try {
   sh('open', [karantina]);
   await bekle(7000);
   ekran('site-2-gatekeeper-uyarisi');
+  // Uyarıdaki düğmeler (dil İngilizce ya da Türkçe olabilir); "Bitti / Done" — ÇÖP SEPETİNE TAŞI'ya değil
+  const uyariMetni = sh('osascript', ['-e', 'tell application "System Events" to tell process "CoreServicesUIAgent" to get {name of every button of window 1, value of every static text of window 1}']);
+  yaz('Gatekeeper uyarısının metni', true, uyariMetni.cikti.slice(0, 400), false);
+  const bitti = sh('osascript', ['-e', 'tell application "System Events" to tell process "CoreServicesUIAgent" to click (first button of window 1 whose name is "Bitti" or name is "Done")']);
+  yaz('uyarıda "Bitti"ye basıldı', bitti.ok, bitti.cikti.slice(0, 200), false);
+  await bekle(3000);
   sh('killall', ['AtlasCAD']);
-  // Sistem Ayarları → Gizlilik ve Güvenlik ("Yine de Aç" düğmesi sayfanın altında)
+  // Sistem Ayarları → Gizlilik ve Güvenlik → Güvenlik bölümünde "AtlasCAD engellendi … Yine de Aç"
   sh('open', ['x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension']);
   await bekle(8000);
   ekran('site-3-gizlilik-guvenlik');
   sh('open', ['x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Security']);
-  await bekle(5000);
+  await bekle(6000);
   ekran('site-4-guvenlik-bolumu');
+  // "Yine de Aç" düğmesini bul (ekranın altındaysa görünür olsun diye) ve bas → onay / parola penceresi (iptal edilir)
+  const yineDe = sh('osascript', ['-e', `tell application "System Events" to tell process "System Settings"
+    set bulunan to missing value
+    repeat with e in (entire contents of window 1)
+      try
+        if (role of e is "AXButton") and (name of e is "Yine de Aç" or name of e is "Open Anyway") then set bulunan to e
+      end try
+    end repeat
+    if bulunan is missing value then return "yok"
+    click bulunan
+    return "basıldı"
+  end tell`], { timeout: 120_000 });
+  yaz('Gizlilik ve Güvenlik: "Yine de Aç" düğmesi', /basıldı/.test(yineDe.cikti), yineDe.cikti.slice(0, 200), false);
+  await bekle(4000);
+  ekran('site-5-yine-de-ac-onayi');
+  sh('osascript', ['-e', 'tell application "System Events" to key code 53']);
+  await bekle(1500);
   sh('killall', ['System Settings']);
 } catch (e) {
   yaz('site görüntüleri', false, e.message, false);
