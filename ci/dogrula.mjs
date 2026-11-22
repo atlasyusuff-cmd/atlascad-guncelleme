@@ -210,12 +210,20 @@ try {
     window.confirm = () => true;
     window.tikla = (re, kok = document) => { const e = [...kok.querySelectorAll('button')].find(b => re.test(b.textContent.trim()) && !b.disabled); e?.click(); return !!e; };
     window.uyu = (ms) => new Promise(r => setTimeout(r, ms));`);
-  const acildi = await calistir(`tikla(/^Yeni$/); await uyu(700); tikla(/^Kaydetmeden devam$/); await uyu(900); [...document.querySelectorAll('*')].find(e => e.children.length === 0 && e.textContent.trim() === 'Örnek mutfağı incele')?.click(); await uyu(3000); tikla(/^3B$/); await uyu(3500); const c = [...document.querySelectorAll('main.orta canvas')].filter((x) => x.width > 300 && x.height > 200).length; return JSON.stringify({ c, metin: document.body.innerText.replace(/\\s+/g, ' ').slice(0, 3000) });`, 60_000);
+  const acildi = await calistir(`tikla(/^Yeni$/); await uyu(700); tikla(/^Kaydetmeden devam$/); await uyu(900); [...document.querySelectorAll('*')].find(e => e.children.length === 0 && e.textContent.trim() === 'Örnek mutfağı incele')?.click(); await uyu(3000); tikla(/^3B$/); await uyu(3500); const c = [...document.querySelectorAll('canvas')].filter((x) => x.width > 300 && x.height > 200).length; const m = document.body.innerText.replace(/\\s+/g, ' ').match(/örnek mutfak \\((\\d+) dolap\\)/); return JSON.stringify({ c, dolap: m ? Number(m[1]) : 0, arayuz: !!document.querySelector('.ust-adimlar') });`, 60_000);
   const aj = JSON.parse(acildi);
-  const dolap = (aj.metin.match(/örnek mutfak \((\d+) dolap\)/) ?? [])[1];
-  yaz('örnek mutfak açıldı (3B)', Number(dolap) > 0 && aj.c > 0, `${dolap} dolap · 3B tuval ${aj.c}`);
+  yaz('örnek mutfak açıldı (3B)', aj.dolap > 0 && aj.c > 0, `${aj.dolap} dolap · 3B tuval ${aj.c} · arayüz ${aj.arayuz}`, ortam.webgl2);
   await sayfaGoruntu('2-ornek-mutfak-3b');
   ekran('2-ornek-mutfak-3b-ekran');
+  if (!aj.arayuz) {
+    // Ekran kartsız makinede 3B açılınca arayüz çöküyor (bkz. TARTISMA): örnek proje kaydedilen oturumdan Parça Listesi sekmesinde
+    // yeniden açılır, üretim ekranları 3B'siz denenir
+    const yeniden = await calistir(`const ham = await window.api.oturumOku(); if (!ham) return 'oturum yok'; const o = JSON.parse(ham); if (!o.proje) return 'proje yok'; o.sekme = 'liste'; await window.api.oturumYaz(JSON.stringify(o)); location.reload(); return 'yeniden yüklendi';`).catch((e) => e.message);
+    await bekle(6000);
+    await calistir(`window.confirm = () => true; window.tikla = (re, kok = document) => { const e = [...kok.querySelectorAll('button')].find(b => re.test(b.textContent.trim()) && !b.disabled); e?.click(); return !!e; }; window.uyu = (ms) => new Promise(r => setTimeout(r, ms)); return true;`).catch(() => {});
+    const var2 = await calistir(`return !!document.querySelector('.ust-adimlar');`).catch(() => false);
+    yaz('ekran kartsız: örnek proje 3B\'siz (Parça Listesi) yeniden açıldı', var2, yeniden, false);
+  }
   const liste = await calistir(`tikla(/Üretim$/, document.querySelector('.ust-adimlar')); await uyu(1500); tikla(/^Parça Listesi$/); await uyu(2500); const t = document.querySelector('main.orta'); return JSON.stringify({ satir: t?.querySelectorAll('tr').length ?? 0, metin: (t?.innerText ?? '').slice(0, 200).replace(/\\s+/g, ' ') });`, 60_000);
   const lj = JSON.parse(liste);
   yaz('parça listesi (kesim listesi) dolu', lj.satir > 10, `${lj.satir} satır · ${lj.metin.slice(0, 120)}`);
