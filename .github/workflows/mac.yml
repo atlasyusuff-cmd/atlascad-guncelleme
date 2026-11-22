@@ -67,7 +67,11 @@ jobs:
       - name: Bağımlılıklar
         if: env.SECILI == 'true'
         working-directory: ${{ runner.temp }}/kaynak
-        run: npm ci --no-audit --no-fund --loglevel=error
+        # Electron 45 ikiliyi kurulumda değil ilk kullanımda indiriyor; bayt kodu derleyicisi (electron-vite) path.txt'yi hazır bekler
+        run: |
+          npm ci --no-audit --no-fund --loglevel=error
+          node node_modules/electron/install.js
+          echo "Electron: $(cat node_modules/electron/path.txt)"
 
       - name: Mac yardımcı testleri (gerçek ioreg / diskutil çıktısı)
         if: env.SECILI == 'true'
