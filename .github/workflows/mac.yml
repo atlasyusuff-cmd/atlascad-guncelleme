@@ -79,6 +79,12 @@ jobs:
         working-directory: ${{ runner.temp }}/kaynak
         run: npx vitest run tests/k068Mac.test.ts tests/k068MacGercek.test.ts --reporter=dot
 
+      - name: Örnek mutfak dosyası (Finder'dan .mcad açma denemesi için)
+        if: env.SECILI == 'true'
+        continue-on-error: true
+        working-directory: ${{ runner.temp }}/kaynak
+        run: ORNEK_MCAD="$RUNNER_TEMP/Ornek Mutfak.mcad" npx vitest run --config vitest.betik.config.mts scripts/mac-ci/ornek.betik.ts --reporter=dot
+
       - name: Paketle (dmg)
         if: env.SECILI == 'true'
         working-directory: ${{ runner.temp }}/kaynak
@@ -88,6 +94,7 @@ jobs:
         if: env.SECILI == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          ORNEK_MCAD: ${{ runner.temp }}/Ornek Mutfak.mcad
         run: node ci/dogrula.mjs "$RUNNER_TEMP/kaynak" "$RUNNER_TEMP/kanit" "$MIMARI" "$ETIKET" "$YAYIN_NO"
 
       - name: Yapıtları topla, kaynağı sil
