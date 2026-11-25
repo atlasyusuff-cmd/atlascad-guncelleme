@@ -96,6 +96,9 @@ const kapi = 9377;
 const profil = mkdtempSync(join(tmpdir(), 'atlascad-mac-profil-'));
 const denemeMac = join(homedir(), 'Library', 'Preferences', '.atlascad-d.json');
 rmSync(denemeMac, { force: true });
+// K-079: makine geneli deneme kopyası (yeni kullanıcıda sıfırlanmasın); temiz başlangıç ve kurcalama denemesinde o da değiştirilir (Gemini D1-1)
+const denemeGenel = '/Users/Shared/.atlascad-d.dat';
+rmSync(denemeGenel, { force: true });
 sh('defaults', ['delete', 'tr.atlascad.kayit']);
 const gunluk = [];
 let surec = null;
@@ -169,8 +172,8 @@ try {
   // herkese açık depoda yazılmaz)
   const uuid = (/"IOPlatformUUID"\s*=\s*"([0-9A-Fa-f-]{36})"/.exec(sh('/usr/sbin/ioreg', ['-rd1', '-c', 'IOPlatformExpertDevice']).cikti) ?? [])[1] ?? '';
   yaz('makine kodu biçimi (16 karakter)', /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/.test(ld.makine ?? ''), ld.makine);
-  yaz('deneme kaydı üç yerde (2 dosya + defaults)', existsSync(join(profil, 'deneme.json')) && existsSync(denemeMac) && sh('defaults', ['read', 'tr.atlascad.kayit', 'd']).ok,
-    `${existsSync(join(profil, 'deneme.json'))} ${existsSync(denemeMac)} ${sh('defaults', ['read', 'tr.atlascad.kayit', 'd']).ok}`);
+  yaz('deneme kaydı dört yerde (2 dosya + defaults + /Users/Shared)', existsSync(join(profil, 'deneme.json')) && existsSync(denemeMac) && sh('defaults', ['read', 'tr.atlascad.kayit', 'd']).ok && existsSync(denemeGenel),
+    `${existsSync(join(profil, 'deneme.json'))} ${existsSync(denemeMac)} ${sh('defaults', ['read', 'tr.atlascad.kayit', 'd']).ok} ${existsSync(denemeGenel)}`);
   if (YAYIN && GH_TOKEN) {
     const ad = `makine-${MIMARI}-${ETIKET}.json`;
     const r = await fetch(`https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${YAYIN}/assets?name=${ad}`, {
@@ -287,12 +290,14 @@ try {
   const eski = Buffer.from(JSON.stringify({ ilk: new Date(Date.now() - 30 * 86400000).toISOString(), son: new Date(Date.now() - 86400000).toISOString() })).toString('base64');
   writeFileSync(join(profil, 'deneme.json'), eski);
   writeFileSync(denemeMac, eski);
+  writeFileSync(denemeGenel, eski);
   sh('defaults', ['delete', 'tr.atlascad.kayit']);
   const kurcali = await lisansDurumu();
   yaz('satış: elle değiştirilen deneme kaydı kabul edilmez', kurcali.durum === 'kilitli', JSON.stringify(kurcali));
   if (yerel?.suresiDolmus) {
     writeFileSync(join(profil, 'deneme.json'), yerel.suresiDolmus);
     writeFileSync(denemeMac, yerel.suresiDolmus);
+    writeFileSync(denemeGenel, yerel.suresiDolmus);
     sh('defaults', ['delete', 'tr.atlascad.kayit']);
     const kilit = await lisansDurumu();
     yaz('satış: deneme süresi dolunca kilitli', kilit.durum === 'kilitli' && /süresi doldu/i.test(kilit.neden ?? ''), JSON.stringify(kilit));
