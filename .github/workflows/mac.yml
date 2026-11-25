@@ -88,7 +88,10 @@ jobs:
       - name: Paketle (dmg)
         if: env.SECILI == 'true'
         working-directory: ${{ runner.temp }}/kaynak
-        run: node scripts/paketle-mac.mjs --arch "$MIMARI"
+        # K-079: iki paket. Önce AtlasCAD (temel, dist-mac-temel), sonra AtlasCAD CNC (dist-mac); doğrulama dist-mac'teki CNC uygulamasını açar
+        run: |
+          node scripts/paketle-mac.mjs --arch "$MIMARI" --paket temel
+          node scripts/paketle-mac.mjs --arch "$MIMARI"
 
       - name: Doğrula (aç, lisans, örnek mutfak, kesim listesi, ekran görüntüleri)
         if: env.SECILI == 'true'
@@ -102,6 +105,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/yapit"
           cp "$RUNNER_TEMP"/kaynak/dist-mac/*.dmg "$RUNNER_TEMP/yapit/" 2>/dev/null || true
+          cp "$RUNNER_TEMP"/kaynak/dist-mac-temel/*.dmg "$RUNNER_TEMP/yapit/" 2>/dev/null || true
           cp -R "$RUNNER_TEMP/kanit" "$RUNNER_TEMP/yapit/kanit" 2>/dev/null || true
           rm -rf "$RUNNER_TEMP/kaynak"
 
